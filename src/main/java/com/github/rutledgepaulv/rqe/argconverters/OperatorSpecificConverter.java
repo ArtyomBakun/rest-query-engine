@@ -20,6 +20,8 @@ import com.github.rutledgepaulv.rqe.utils.TriFunction;
 import java.util.List;
 import java.util.function.BiFunction;
 
+import static com.github.rutledgepaulv.rqe.operators.QueryOperator.EXISTS;
+import static com.github.rutledgepaulv.rqe.operators.QueryOperator.SUBQUERY_ANY;
 import static java.util.Collections.singletonList;
 import static java.util.stream.Collectors.toList;
 
@@ -41,16 +43,12 @@ public class OperatorSpecificConverter implements ArgConverter {
 
     @Override
     public List<?> apply(ArgConversionContext context) {
-        switch(context.getQueryOperator()) {
-            case REGEX:
-                return context.getValues().stream().limit(1).map(Object::toString).collect(toList());
-            case EXISTS:
-                return context.getValues().stream().map(Boolean::valueOf).collect(toList());
-            case SUBQUERY_ANY:
-                return singletonList(parse(context));
-            default:
-                throw new UnsupportedQueryOperatorException("This converter cannot handle the operator " + context.getQueryOperator());
+        if (EXISTS.equals(context.getQueryOperator())) {
+            return context.getValues().stream().map(Boolean::valueOf).collect(toList());
+        } else if (SUBQUERY_ANY.equals(context.getQueryOperator())) {
+            return singletonList(parse(context));
         }
+        throw new UnsupportedQueryOperatorException("This converter cannot handle the operator " + context.getQueryOperator());
     }
 
     private AbstractNode parse(ArgConversionContext context) {
