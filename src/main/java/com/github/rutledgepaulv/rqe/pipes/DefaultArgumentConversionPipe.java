@@ -25,17 +25,14 @@ import com.github.rutledgepaulv.rqe.resolvers.EntityFieldTypeResolver;
 import com.github.rutledgepaulv.rqe.utils.TriFunction;
 import cz.jirutka.rsql.parser.ast.*;
 
-import java.util.Collection;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import static java.util.stream.Collectors.toList;
 
 public class DefaultArgumentConversionPipe implements BiFunction<Node, Class<?>, AbstractNode>,
-                                                      TriFunction<Node, Class<?>, ParseTreeContext, AbstractNode> {
+        TriFunction<Node, Class<?>, ParseTreeContext, AbstractNode> {
 
     public static class DefaultArgumentConversionPipeBuilder {
 
@@ -43,6 +40,7 @@ public class DefaultArgumentConversionPipe implements BiFunction<Node, Class<?>,
         private StringToTypeConverter stringToTypeConverter = new SpringConversionServiceConverter();
         private BiFunction<FieldPath, Class<?>, Class<?>> fieldResolver = new EntityFieldTypeResolver();
         private List<ArgConverter> customConverters = new LinkedList<>();
+        private Set<QueryOperator> queryOperators = QueryOperator.defaultOperators();
 
         public DefaultArgumentConversionPipeBuilder useNonDefaultParsingPipe(Function<String, Node> parsingPipe) {
             this.parsingPipe = parsingPipe;
@@ -66,6 +64,11 @@ public class DefaultArgumentConversionPipe implements BiFunction<Node, Class<?>,
             return this;
         }
 
+        public DefaultArgumentConversionPipeBuilder useNonDefaultQueryOperators(Set<QueryOperator> queryOperators) {
+            this.queryOperators = queryOperators;
+            return this;
+        }
+
         public DefaultArgumentConversionPipe build() {
             return new DefaultArgumentConversionPipe(this);
         }
@@ -83,6 +86,7 @@ public class DefaultArgumentConversionPipe implements BiFunction<Node, Class<?>,
     private StringToTypeConverter stringToTypeConverter;
     private BiFunction<FieldPath, Class<?>, Class<?>> fieldResolver;
     private Collection<ArgConverter> customConverters = new LinkedList<>();
+    private Set<QueryOperator> queryOperators;
 
 
     private DefaultArgumentConversionPipe(DefaultArgumentConversionPipeBuilder builder) {
@@ -90,6 +94,7 @@ public class DefaultArgumentConversionPipe implements BiFunction<Node, Class<?>,
         this.stringToTypeConverter = Objects.requireNonNull(builder.stringToTypeConverter);
         this.fieldResolver = Objects.requireNonNull(builder.fieldResolver);
         this.customConverters.addAll(builder.customConverters);
+        this.queryOperators = builder.queryOperators;
     }
 
 
@@ -102,7 +107,7 @@ public class DefaultArgumentConversionPipe implements BiFunction<Node, Class<?>,
     public AbstractNode apply(Node node, Class<?> entityClass, ParseTreeContext parseTreeContext) {
         ConverterChain chain = new ConverterChain();
 
-        for(ArgConverter converter : customConverters) {
+        for (ArgConverter converter : customConverters) {
             chain = chain.append(converter);
         }
 
@@ -115,7 +120,7 @@ public class DefaultArgumentConversionPipe implements BiFunction<Node, Class<?>,
 
     private TriFunction<String, Class<?>, ParseTreeContext, AbstractNode> subqueryPipeline(TriFunction<Node, Class<?>, ParseTreeContext, AbstractNode> pipe) {
         return (rsql, clazz, parseTreeContext) -> parsingPipe.andThen(node ->
-                        pipe.apply(node, clazz, parseTreeContext)).apply(rsql);
+                pipe.apply(node, clazz, parseTreeContext)).apply(rsql);
     }
 
 
@@ -158,11 +163,13 @@ public class DefaultArgumentConversionPipe implements BiFunction<Node, Class<?>,
         @Override
         public AbstractNode visit(ComparisonNode node, ParseTreeContext param) {
 
-            QueryOperator operator = QueryOperator.fromParserOperator(node.getOperator());
+            QueryOperator operator = queryOperators.stream()
+                    .filter(qo -> qo.parserOperator().equals(node.getOperator()))
+                    .findFirst().orElseThrow(() -> new IllegalArgumentException("Unknown operator!"));
 
             FieldPath path = new FieldPath(node.getSelector());
 
-            if(param.getParentPath().isPresent()) {
+            if (param.getParentPath().isPresent()) {
                 path = path.prepend(param.getParentPath().get());
             }
 
@@ -186,18 +193,17 @@ public class DefaultArgumentConversionPipe implements BiFunction<Node, Class<?>,
 
         private Collection<AbstractNode> visitChildren(LogicalNode node, ParseTreeContext param) {
             return node.getChildren().stream().map(child -> {
-               if(child instanceof AndNode) {
-                   return this.visit((AndNode)child, param);
-               } else if (child instanceof OrNode) {
-                   return this.visit((OrNode)child, param);
-               } else {
-                   return this.visit((ComparisonNode)child, param);
-               }
+                if (child instanceof AndNode) {
+                    return this.visit((AndNode) child, param);
+                } else if (child instanceof OrNode) {
+                    return this.visit((OrNode) child, param);
+                } else {
+                    return this.visit((ComparisonNode) child, param);
+                }
             }).collect(toList());
         }
 
     }
-
 
 
 }
